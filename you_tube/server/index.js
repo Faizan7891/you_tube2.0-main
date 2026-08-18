@@ -13,6 +13,7 @@ import commentReactionRoutes from "./routes/commentReaction.js";
 import dns from "dns";
 import translationRoutes from "./routes/translation.js";
 import captchaRoutes from "./routes/captcha.js";
+import downloadRoutes from "./routes/download.js";
 dns.setServers(["1.1.1.1", "8.8.8.8"]);
   
 dotenv.config();
@@ -35,6 +36,7 @@ app.use("/comment", commentroutes);
 app.use("/comment-reaction", commentReactionRoutes);
 app.use("/translation", translationRoutes);
 app.use("/captcha", captchaRoutes);
+app.use("/download", downloadRoutes);
 
 const PORT = process.env.PORT || 5000;
 

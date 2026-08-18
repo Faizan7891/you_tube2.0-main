@@ -12,6 +12,7 @@ import {
 import { formatDistanceToNow } from "date-fns";
 import { useUser } from "@/lib/AuthContext";
 import axiosInstance from "@/lib/axiosinstance";
+import { getDeviceId } from "@/lib/deviceId";
 
 const VideoInfo = ({ video }: any) => {
   const [likes, setlikes] = useState(video.Like || 0);
@@ -111,6 +112,80 @@ const VideoInfo = ({ video }: any) => {
       console.log(error);
     }
   };
+
+ const handleDownload = async () => {
+  if (!user) {
+    alert("Please login to download videos.");
+    return;
+  }
+
+  try {
+    const deviceId = getDeviceId();
+
+    const response = await axiosInstance.get(
+      `/download/${video._id}`,
+      {
+        responseType: "blob",
+
+        headers: {
+          "X-Device-ID": deviceId,
+        },
+      }
+    );
+
+    const blob = new Blob([
+      response.data,
+    ]);
+
+    const url =
+      window.URL.createObjectURL(blob);
+
+    const link =
+      document.createElement("a");
+
+    link.href = url;
+
+    link.download =
+      video.filename || "video.mp4";
+
+    document.body.appendChild(link);
+
+    link.click();
+
+    link.remove();
+
+    window.URL.revokeObjectURL(url);
+  } catch (error: any) {
+    console.error(
+      "Download failed:",
+      error
+    );
+
+    if (
+      error.response?.data instanceof Blob
+    ) {
+      const text =
+        await error.response.data.text();
+
+      try {
+        const data =
+          JSON.parse(text);
+
+        alert(
+          data.message ||
+            "Download failed"
+        );
+      } catch {
+        alert("Download failed");
+      }
+    } else {
+      alert(
+        error.response?.data?.message ||
+          "Download failed"
+      );
+    }
+  }
+};
   return (
     <div className="space-y-4">
       <h1 className="text-xl font-semibold">{video.videotitle}</h1>
@@ -175,14 +250,15 @@ const VideoInfo = ({ video }: any) => {
             <Share className="w-5 h-5 mr-2" />
             Share
           </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="bg-gray-100 rounded-full"
-          >
-            <Download className="w-5 h-5 mr-2" />
-            Download
-          </Button>
+         <Button
+  variant="ghost"
+  size="sm"
+  className="bg-gray-100 rounded-full"
+  onClick={handleDownload}
+>
+  <Download className="w-5 h-5 mr-2" />
+  Download
+</Button>
           <Button
             variant="ghost"
             size="icon"

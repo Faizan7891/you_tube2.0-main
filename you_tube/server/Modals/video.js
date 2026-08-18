@@ -7,6 +7,10 @@ const videochema = mongoose.Schema(
     filename: { type: String, required: true },
     filepath: { type: String, required: true },
     filesize: { type: String, required: true },
+    thumbnail: {
+  type: String,
+  default: "",
+},
     videochanel: { type: String, required: true },
     Like: { type: Number, default: 0 },
     views: { type: Number, default: 0 },
