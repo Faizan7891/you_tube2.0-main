@@ -46,7 +46,7 @@ const extractMentions = (text) => {
 };
 // CREATE COMMENT
 export const postcomment = async (req, res) => {
-    // CAPTCHA verification
+  // CAPTCHA verification
   if (req.body.altcha) {
     try {
       const captchaValid = await verifySolution(
@@ -338,7 +338,7 @@ export const editcomment = async (req, res) => {
     }
 
     // 10-minute edit/delete window
-    const TEN_MINUTES = 10 *60 * 1000;
+    const TEN_MINUTES = 10 * 60 * 1000;
 
     const commentAge =
       Date.now() -
@@ -499,7 +499,7 @@ export const replyToComment = async (req, res) => {
 
     await newReply.save();
 
-    await newReply.save();
+
 
     await commentHistory.create({
       commentId: newReply._id,
@@ -703,6 +703,7 @@ export const getReportedComments = async (req, res) => {
     });
   }
 };
+
 export const dismissReport = async (req, res) => {
   try {
     const { reportId } = req.params;
@@ -751,6 +752,58 @@ export const dismissReport = async (req, res) => {
   }
 };
 
+export const reviewReport = async (req, res) => {
+  try {
+    const { reportId } = req.params;
+
+    const admin = await getAdminUser(req);
+
+    if (!admin) {
+      return res.status(403).json({
+        message: "Admin access required.",
+      });
+    }
+
+    const report = await commentReport.findById(reportId);
+
+    if (!report) {
+      return res.status(404).json({
+        message: "Report not found.",
+      });
+    }
+
+    if (report.status !== "pending") {
+      return res.status(400).json({
+        message: "This report has already been reviewed.",
+      });
+    }
+
+    report.status = "reviewed";
+    report.reviewedBy = admin._id;
+    report.reviewedAt = new Date();
+
+    await report.save();
+
+    await moderationLog.create({
+      reportId: report._id,
+      commentId: report.commentId,
+      adminId: admin._id,
+      action: "reviewed",
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Report marked as reviewed.",
+    });
+  } catch (error) {
+    console.error("Review report error:", error);
+
+    return res.status(500).json({
+      message: "Unable to review report.",
+    });
+  }
+};
+
 export const deleteReportedComment = async (
   req,
   res
@@ -780,12 +833,27 @@ export const deleteReportedComment = async (
       await comment.findById(report.commentId);
 
     if (existingComment) {
-      await comment.findByIdAndDelete(
-        report.commentId
+      await comment.findByIdAndUpdate(
+        report.commentId,
+        {
+          $set: {
+            status: "deleted",
+            deletedAt: new Date(),
+            commentbody: "",
+          },
+        }
       );
+
+      await commentHistory.create({
+        commentId: existingComment._id,
+        userId: admin._id,
+        action: "DELETED",
+        oldText: existingComment.commentbody,
+        newText: "",
+      });
     }
 
-    report.status = "reviewed";
+    report.status = "deleted";
     report.reviewedBy = admin._id;
     report.reviewedAt = new Date();
 

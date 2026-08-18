@@ -72,6 +72,29 @@ const { user } = useUser();
     }
   };
 
+  const reviewReport = async (reportId: string) => {
+  try {
+    await axiosInstance.patch(
+      `/comment/admin/reports/${reportId}/review`
+    );
+
+    setReports((prev) =>
+      prev.map((report) =>
+        report._id === reportId
+          ? {
+              ...report,
+              status: "reviewed",
+            }
+          : report
+      )
+    );
+  } catch (err: any) {
+    alert(
+      err?.response?.data?.message ||
+        "Unable to review report."
+    );
+  }
+};
   const deleteComment = async (reportId: string) => {
     const confirmed = window.confirm(
       "Delete this reported comment?"
@@ -169,25 +192,34 @@ const { user } = useUser();
                 </p>
 
                 {report.status === "pending" && (
-                  <div className="flex gap-3">
-                    <button
-                      onClick={() =>
-                        dismissReport(report._id)
-                      }
-                      className="rounded-md border px-4 py-2 text-sm hover:bg-gray-100"
-                    >
-                      Dismiss
-                    </button>
+                 <div className="flex gap-3">
+  <button
+    onClick={() =>
+      reviewReport(report._id)
+    }
+    className="rounded-md border px-4 py-2 text-sm hover:bg-gray-100"
+  >
+    Review
+  </button>
 
-                    <button
-                      onClick={() =>
-                        deleteComment(report._id)
-                      }
-                      className="rounded-md bg-red-600 px-4 py-2 text-sm text-white hover:bg-red-700"
-                    >
-                      Delete Comment
-                    </button>
-                  </div>
+  <button
+    onClick={() =>
+      dismissReport(report._id)
+    }
+    className="rounded-md border px-4 py-2 text-sm hover:bg-gray-100"
+  >
+    Dismiss
+  </button>
+
+  <button
+    onClick={() =>
+      deleteComment(report._id)
+    }
+    className="rounded-md bg-red-600 px-4 py-2 text-sm text-white hover:bg-red-700"
+  >
+    Delete Comment
+  </button>
+</div>
                 )}
               </div>
             ))}

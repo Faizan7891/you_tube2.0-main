@@ -22,8 +22,7 @@ const moderationLogSchema = new mongoose.Schema(
 
     action: {
       type: String,
-      enum: ["dismissed", "deleted"],
-      required: true,
+enum: ["reviewed", "dismissed", "deleted"],      required: true,
     },
 
     note: {

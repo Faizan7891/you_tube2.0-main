@@ -9,6 +9,7 @@ import {
   postcomment,
   editcomment,
   getReportedComments,
+  reviewReport,
 dismissReport,
 deleteReportedComment,
 } from "../controllers/comment.js";
@@ -90,7 +91,11 @@ routes.get(
   requireAuth,
   getReportedComments
 );
-
+routes.patch(
+  "/admin/reports/:reportId/review",
+  requireAuth,
+  reviewReport
+);
 routes.patch(
   "/admin/reports/:reportId/dismiss",
   requireAuth,

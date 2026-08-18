@@ -25,15 +25,16 @@ const commentReportSchema = new mongoose.Schema(
       required: true,
     },
 
-    status: {
-      type: String,
-      enum: [
-        "pending",
-        "reviewed",
-        "dismissed",
-      ],
-      default: "pending",
-    },
+ status: {
+  type: String,
+  enum: [
+    "pending",
+    "reviewed",
+    "dismissed",
+    "deleted",
+  ],
+  default: "pending",
+},
 
     reviewedBy: {
       type: mongoose.Schema.Types.ObjectId,
