@@ -46,7 +46,10 @@ const userschema = mongoose.Schema({
     default: Date.now,
   },
 
-  // Subscription details
+  // =========================
+  // SUBSCRIPTION
+  // =========================
+
   subscriptionPlan: {
     type: String,
     enum: ["free", "bronze", "silver", "gold"],
@@ -55,7 +58,7 @@ const userschema = mongoose.Schema({
 
   subscriptionStartDate: {
     type: Date,
-    default: Date.now,
+    default: null,
   },
 
   subscriptionExpiryDate: {
@@ -63,7 +66,22 @@ const userschema = mongoose.Schema({
     default: null,
   },
 
-  // Download limits
+  scheduledSubscriptionPlan: {
+    type: String,
+    enum: ["free", "bronze", "silver", "gold"],
+    default: null,
+  },
+
+  scheduledSubscriptionValidity: {
+    type: String,
+    enum: ["monthly", "quarterly", "yearly"],
+    default: null,
+  },
+
+  // =========================
+  // DOWNLOAD LIMITS
+  // =========================
+
   dailyDownloadLimit: {
     type: Number,
     default: 1,
@@ -73,10 +91,87 @@ const userschema = mongoose.Schema({
     type: Number,
     default: 30,
   },
+
+  // =========================
+  // REGISTERED DEVICE
+  // =========================
+
   registeredDeviceId: {
-  type: String,
-  default: null,
-},
+    type: String,
+    default: null,
+  },
+
+  // =========================
+  // THEME
+  // =========================
+
+  theme: {
+    type: String,
+    enum: ["light", "dark"],
+    default: "dark",
+  },
+
+  // =========================
+  // TRUSTED DEVICES
+  // =========================
+
+  trustedDevices: [
+    {
+      deviceId: {
+        type: String,
+        required: true,
+      },
+
+      browser: {
+        type: String,
+        default: "unknown",
+      },
+
+      deviceType: {
+        type: String,
+        default: "Unknown",
+      },
+
+      ipAddress: {
+        type: String,
+        default: "unknown",
+      },
+
+      trustedUntil: {
+        type: Date,
+        required: true,
+      },
+
+      createdAt: {
+        type: Date,
+        default: Date.now,
+      },
+    },
+  ],
+
+  // =========================
+  // LOGIN OTP
+  // =========================
+
+  otpCode: {
+    type: String,
+    default: null,
+  },
+
+  otpExpiresAt: {
+    type: Date,
+    default: null,
+  },
+
+  otpAttempts: {
+    type: Number,
+    default: 0,
+  },
+
+  otpVerified: {
+    type: Boolean,
+    default: false,
+  },
 });
 
 export default mongoose.model("user", userschema);

@@ -14,6 +14,11 @@ import dns from "dns";
 import translationRoutes from "./routes/translation.js";
 import captchaRoutes from "./routes/captcha.js";
 import downloadRoutes from "./routes/download.js";
+import securityRoutes from "./routes/security.js";
+import subscriptionRoutes from "./routes/subscription.js";
+import {
+  processExpiredSubscriptions,  
+} from "./controllers/subscription.js";
 dns.setServers(["1.1.1.1", "8.8.8.8"]);
   
 dotenv.config();
@@ -37,6 +42,14 @@ app.use("/comment-reaction", commentReactionRoutes);
 app.use("/translation", translationRoutes);
 app.use("/captcha", captchaRoutes);
 app.use("/download", downloadRoutes);
+app.use(
+  "/subscription",
+  subscriptionRoutes
+);
+app.use(
+  "/security",
+  securityRoutes
+);
 
 const PORT = process.env.PORT || 5000;
 
@@ -49,7 +62,16 @@ mongoose
   .connect(DBURL)
   .then(() => {
     console.log("Mongodb connected");
+
+    // Check expired subscriptions immediately
+    processExpiredSubscriptions();
+
+    // Check every hour
+    setInterval(() => {
+      processExpiredSubscriptions();
+    }, 60 * 60 * 1000);
   })
   .catch((error) => {
     console.log(error);
   });
+

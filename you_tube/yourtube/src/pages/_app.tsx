@@ -1,9 +1,10 @@
 import Header from "@/components/Header";
 import Sidebar from "@/components/Sidebar";
 import { Toaster } from "@/components/ui/sonner";
-import "@/styles/globals.css";
+import "../styles/globals.css";
 import type { AppProps } from "next/app";
 import { UserProvider } from "../lib/AuthContext";
+import LoginOTP from "@/components/LoginOTP";
 export default function App({ Component, pageProps }: AppProps) {
   return (
     <UserProvider>
@@ -15,6 +16,7 @@ export default function App({ Component, pageProps }: AppProps) {
           <Sidebar />
           <Component {...pageProps} />
         </div>
+        <LoginOTP />
       </div>
     </UserProvider>
   );
