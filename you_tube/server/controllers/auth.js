@@ -26,80 +26,55 @@ export const login = async (req, res) => {
       });
     }
 
-    // Get browser, device, IP and device ID
-    const deviceInfo =
-      getLoginDeviceInfo(req);
-    const locationInfo =
-      await getLocationFromIp(
-        deviceInfo.ipAddress
-      );
-    // Determine automatic theme using IST
-    const automaticTheme =
-      getLoginTheme();
+    // Detect current login source
+    const deviceInfo = getLoginDeviceInfo(req);
 
-    let existingUser =
-      await users.findOne({ email });
+    const locationInfo = await getLocationFromIp(
+      deviceInfo.ipAddress
+    );
 
-    // --------------------------------------------------
+    // Automatic theme based on IST login time
+    const automaticTheme = getLoginTheme();
+
+    let existingUser = await users.findOne({ email });
+
+    // ==================================================
     // NEW USER
-    // --------------------------------------------------
+    // ==================================================
 
     if (!existingUser) {
       existingUser = await users.create({
         email,
         name,
         image,
-
-        // Automatically set theme
         theme: automaticTheme,
       });
 
-      // Save login record
       await LoginHistory.create({
         userId: existingUser._id,
 
-        ipAddress:
-          deviceInfo.ipAddress,
-
-        browser:
-          deviceInfo.browser,
-
-        browserVersion:
-          deviceInfo.browserVersion,
-
-        operatingSystem:
-          deviceInfo.operatingSystem,
-
-        deviceType:
-          deviceInfo.deviceType,
-
-        deviceModel:
-          deviceInfo.deviceModel,
+        ipAddress: deviceInfo.ipAddress,
+        browser: deviceInfo.browser,
+        browserVersion: deviceInfo.browserVersion,
+        operatingSystem: deviceInfo.operatingSystem,
+        deviceType: deviceInfo.deviceType,
+        deviceModel: deviceInfo.deviceModel,
 
         loginTimestamp: new Date(),
 
         status: "success",
 
         otpRequired: false,
-
         otpVerified: false,
 
-        deviceId:
-          deviceInfo.deviceId,
-
-
+        deviceId: deviceInfo.deviceId,
         trustedDevice: false,
 
         city: locationInfo.city,
-
         state: locationInfo.state,
-
         country: locationInfo.country,
-
         latitude: locationInfo.latitude,
-
         longitude: locationInfo.longitude,
-
         location: locationInfo.location,
       });
 
@@ -109,77 +84,148 @@ export const login = async (req, res) => {
       });
     }
 
-    // --------------------------------------------------
-    // EXISTING USER
-    // --------------------------------------------------
+    // ==================================================
+    // REMOVE EXPIRED TRUSTED DEVICES
+    // ==================================================
 
-    // Check whether this device is trusted
-    const trustedDevice =
-      existingUser.trustedDevices?.find(
+    const now = new Date();
+
+    existingUser.trustedDevices =
+      (existingUser.trustedDevices || []).filter(
         (device) =>
-          device.deviceId ===
-          deviceInfo.deviceId &&
           device.trustedUntil &&
-          new Date(
-            device.trustedUntil
-          ) > new Date()
+          new Date(device.trustedUntil) > now
       );
 
-    // Check whether this is a new login source
-    const isNewDevice =
+    // ==================================================
+    // CHECK TRUSTED LOGIN SOURCE
+    // ==================================================
+
+  const trustedDevice =
+  existingUser.trustedDevices?.find(
+    (device) => {
+      const sameDevice =
+        device.deviceId ===
+        deviceInfo.deviceId;
+
+      const sameBrowser =
+        device.browser ===
+        deviceInfo.browser;
+
+      const sameDeviceType =
+        device.deviceType ===
+        deviceInfo.deviceType;
+
+      const sameIP =
+        device.ipAddress ===
+        deviceInfo.ipAddress;
+
+      const stillTrusted =
+        device.trustedUntil &&
+        new Date(device.trustedUntil) >
+          new Date();
+
+      return (
+        sameDevice &&
+        sameBrowser &&
+        sameDeviceType &&
+        sameIP &&
+        stillTrusted
+      );
+    }
+  );
+
+const isNewDevice =
+  !trustedDevice;
+
+  console.log(
+  "========== LOGIN DEBUG =========="
+);
+
+console.log(
+  "Browser:",
+  deviceInfo.browser
+);
+
+console.log(
+  "Browser Version:",
+  deviceInfo.browserVersion
+);
+
+console.log(
+  "Device ID:",
+  deviceInfo.deviceId
+);
+
+console.log(
+  "IP:",
+  deviceInfo.ipAddress
+);
+
+console.log(
+  "Trusted Device:",
+  trustedDevice
+);
+
+console.log(
+  "OTP Required:",
+  isNewDevice
+);
+
+console.log(
+  "================================="
+);
+
+    // ==================================================
+    // DETERMINE WHETHER OTP IS REQUIRED
+    // ==================================================
+
+    const otpRequired =
       !trustedDevice;
 
-    // --------------------------------------------------
-    // UPDATE AUTOMATIC THEME ONLY
-    // IF USER HAS NOT MANUALLY SET ONE
-    // --------------------------------------------------
-
+    // Save current theme only if profile has no manual
+    // preference yet.
     if (!existingUser.theme) {
-      existingUser.theme =
-        automaticTheme;
-
-      await existingUser.save();
+      existingUser.theme = automaticTheme;
     }
 
-    // --------------------------------------------------
-    // NEW DEVICE → OTP REQUIRED
-    // --------------------------------------------------
+    await existingUser.save();
 
-    if (isNewDevice) {
+    // ==================================================
+    // NEW / UNTRUSTED LOGIN
+    // ==================================================
+
+    if (otpRequired) {
       const loginRecord =
         await LoginHistory.create({
           userId: existingUser._id,
 
-          ipAddress:
-            deviceInfo.ipAddress,
-
-          browser:
-            deviceInfo.browser,
-
+          ipAddress: deviceInfo.ipAddress,
+          browser: deviceInfo.browser,
           browserVersion:
             deviceInfo.browserVersion,
-
           operatingSystem:
             deviceInfo.operatingSystem,
-
-          deviceType:
-            deviceInfo.deviceType,
-
-          deviceModel:
-            deviceInfo.deviceModel,
+          deviceType: deviceInfo.deviceType,
+          deviceModel: deviceInfo.deviceModel,
 
           loginTimestamp: new Date(),
 
           status: "otp_required",
 
           otpRequired: true,
-
           otpVerified: false,
 
-          deviceId:
-            deviceInfo.deviceId,
+          deviceId: deviceInfo.deviceId,
 
           trustedDevice: false,
+
+          city: locationInfo.city,
+          state: locationInfo.state,
+          country: locationInfo.country,
+          latitude: locationInfo.latitude,
+          longitude: locationInfo.longitude,
+          location: locationInfo.location,
         });
 
       return res.status(200).json({
@@ -190,75 +236,65 @@ export const login = async (req, res) => {
         loginId: loginRecord._id,
 
         deviceInfo: {
-          browser:
-            deviceInfo.browser,
-
+          browser: deviceInfo.browser,
           browserVersion:
             deviceInfo.browserVersion,
-
           operatingSystem:
             deviceInfo.operatingSystem,
-
           deviceType:
             deviceInfo.deviceType,
+          deviceModel:
+            deviceInfo.deviceModel,
+          ipAddress:
+            deviceInfo.ipAddress,
+          location:
+            locationInfo.location,
         },
       });
     }
 
-    // --------------------------------------------------
-    // TRUSTED DEVICE → LOGIN SUCCESS
-    // --------------------------------------------------
+    // ==================================================
+    // TRUSTED LOGIN
+    // ==================================================
 
     await LoginHistory.create({
       userId: existingUser._id,
 
-      ipAddress:
-        deviceInfo.ipAddress,
-
-      browser:
-        deviceInfo.browser,
-
+      ipAddress: deviceInfo.ipAddress,
+      browser: deviceInfo.browser,
       browserVersion:
         deviceInfo.browserVersion,
-
       operatingSystem:
         deviceInfo.operatingSystem,
-
-      deviceType:
-        deviceInfo.deviceType,
-
-      deviceModel:
-        deviceInfo.deviceModel,
+      deviceType: deviceInfo.deviceType,
+      deviceModel: deviceInfo.deviceModel,
 
       loginTimestamp: new Date(),
 
       status: "success",
 
       otpRequired: false,
-
       otpVerified: true,
 
-      deviceId:
-        deviceInfo.deviceId,
+      deviceId: deviceInfo.deviceId,
 
       trustedDevice: true,
 
       trustedUntil:
         trustedDevice.trustedUntil,
 
-        city: locationInfo.city,
-state: locationInfo.state,
-country: locationInfo.country,
-latitude: locationInfo.latitude,
-longitude: locationInfo.longitude,
-location: locationInfo.location,
+      city: locationInfo.city,
+      state: locationInfo.state,
+      country: locationInfo.country,
+      latitude: locationInfo.latitude,
+      longitude: locationInfo.longitude,
+      location: locationInfo.location,
     });
 
     return res.status(200).json({
       result: existingUser,
       otpRequired: false,
     });
-
   } catch (error) {
     console.error(
       "Login security error:",
