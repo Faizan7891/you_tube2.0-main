@@ -567,21 +567,35 @@ export const getMyDownloads = async (req, res) => {
     const monthlyUsed =
       monthlyQuota?.used || 0;
 
-    const downloads =
-      await download
-        .find({
-          userId: currentUser._id,
-        })
-        .populate(
-          "videoId",
-          "videotitle filename filesize filepath thumbnail"
-        )
-        .sort({
-          downloadDate: -1,
-        });
+const downloads =
+  await download
+    .find({
+      userId: currentUser._id,
+    })
+    .populate(
+      "videoId",
+      "videotitle filename filesize filepath thumbnail"
+    )
+    .sort({
+      downloadDate: -1,
+    });
+
+const downloadsWithThumbnailUrl = downloads.map((item) => {
+  const downloadItem = item.toObject();
+
+  if (
+    downloadItem.videoId &&
+    downloadItem.videoId.thumbnail
+  ) {
+    downloadItem.videoId.thumbnail =
+      `${req.protocol}://${req.get("host")}${downloadItem.videoId.thumbnail}`;
+  }
+
+  return downloadItem;
+});
 
     return res.status(200).json({
-      downloads,
+     downloads: downloadsWithThumbnailUrl,
 
       subscriptionPlan: plan,
 
