@@ -48,13 +48,72 @@ const VideoUploader = ({ channelId, channelName }: any) => {
       toast.error("Your video upload has been cancelled");
     }
   };
+
+  const generateThumbnail = (file: File): Promise<Blob> => {
+  return new Promise((resolve, reject) => {
+    const video = document.createElement("video");
+    const canvas = document.createElement("canvas");
+
+    video.preload = "metadata";
+    video.muted = true;
+
+    video.onloadeddata = () => {
+      // Capture frame at 1 second
+      video.currentTime = Math.min(1, video.duration / 2);
+    };
+
+    video.onseeked = () => {
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+
+      const ctx = canvas.getContext("2d");
+
+      if (!ctx) {
+        reject(new Error("Could not create canvas context"));
+        return;
+      }
+
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      canvas.toBlob(
+        (blob) => {
+          if (blob) {
+            resolve(blob);
+          } else {
+            reject(new Error("Failed to generate thumbnail"));
+          }
+        },
+        "image/jpeg",
+        0.85
+      );
+
+      URL.revokeObjectURL(video.src);
+    };
+
+    video.onerror = () => {
+      reject(new Error("Failed to load video"));
+    };
+
+    video.src = URL.createObjectURL(file);
+  });
+};
+
   const handleUpload = async () => {
     if (!videoFile || !videoTitle.trim()) {
       toast.error("Please provide file and title");
       return;
     }
-    const formdata = new FormData();
-    formdata.append("file", videoFile);
+   const formdata = new FormData();
+
+formdata.append("file", videoFile);
+
+const thumbnail = await generateThumbnail(videoFile);
+
+formdata.append(
+  "thumbnail",
+  thumbnail,
+  `${videoFile.name}-thumbnail.jpg`
+);
     formdata.append("videotitle", videoTitle);
     formdata.append("videochanel", channelName);
     formdata.append("uploader", channelId);

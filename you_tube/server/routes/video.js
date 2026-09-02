@@ -4,6 +4,12 @@ import upload from "../filehelper/filehelper.js";
 
 const routes = express.Router();
 
-routes.post("/upload", upload.single("file"), uploadvideo);
-routes.get("/getall", getallvideo);
+routes.post(
+  "/upload",
+  upload.fields([
+    { name: "file", maxCount: 1 },
+    { name: "thumbnail", maxCount: 1 },
+  ]),
+  uploadvideo
+);routes.get("/getall", getallvideo);
 export default routes;

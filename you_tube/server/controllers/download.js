@@ -378,6 +378,8 @@ if (currentUser.registeredDeviceId !== deviceId) {
         req.socket.remoteAddress ||
         "unknown",
 
+        deviceId: deviceId,
+
      deviceInfo: `${getDevice(
   userAgent
 )} | Device ID: ${deviceId}`,

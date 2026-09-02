@@ -129,7 +129,7 @@ const Downloads = () => {
                 <div className="w-40 h-24 bg-gray-100 rounded overflow-hidden flex-shrink-0">
   {item.videoId?.thumbnail ? (
     <img
-      src={item.videoId.thumbnail}
+src={item.videoId.thumbnail}
       alt={item.videoId?.videotitle || "Video thumbnail"}
       className="w-full h-full object-cover"
     />

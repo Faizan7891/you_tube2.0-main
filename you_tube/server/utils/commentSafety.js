@@ -111,6 +111,37 @@ export const hasExcessiveSpecialCharacters = (
 };
 
 // ================================
+// EXCESSIVE CAPITAL LETTERS
+// ================================
+export const hasExcessiveCaps = (text) => {
+  const letters = text.match(/[a-zA-Z]/g) || [];
+
+  if (letters.length < 10) {
+    return false;
+  }
+
+  const uppercaseLetters = text.match(/[A-Z]/g) || [];
+
+  return uppercaseLetters.length / letters.length >= 0.8;
+};
+
+// ================================
+// PROMOTIONAL SPAM
+// ================================
+export const containsPromotionalSpam = (text) => {
+  const normalized = normalizeText(text);
+
+  const spamPatterns = [
+    /\b(buy now|click here|subscribe now|follow me|dm me)\b/i,
+    /\b(make money|earn money|get rich|free money)\b/i,
+    /\b(visit my channel|check my channel|check my profile)\b/i,
+    /\b(limited offer|special offer|discount|promo code)\b/i,
+  ];
+
+  return spamPatterns.some((pattern) => pattern.test(normalized));
+};
+
+// ================================
 // OVERALL SAFETY CHECK
 // ================================
 export const validateCommentSafety = (text) => {
@@ -153,6 +184,22 @@ export const validateCommentSafety = (text) => {
         "Please avoid excessive special characters or emojis.",
     };
   }
+
+  if (hasExcessiveCaps(text)) {
+  return {
+    allowed: false,
+    message:
+      "Please avoid excessive use of capital letters.",
+  };
+}
+
+if (containsPromotionalSpam(text)) {
+  return {
+    allowed: false,
+    message:
+      "Promotional or spam comments are not allowed.",
+  };
+}
 
   return {
     allowed: true,

@@ -317,50 +317,72 @@ const Comments = ({ videoId }: any) => {
   // =========================
   // CREATE COMMENT
   // =========================
-  const handleSubmitComment = async () => {
-    setCommentError("");
+const handleSubmitComment = async () => {
+  setCommentError("");
 
-    const trimmedComment = newComment.trim();
+  const trimmedComment = newComment.trim();
 
-    if (!user || !trimmedComment) {
-      return;
-    }
+  if (!user || !trimmedComment) {
+    return;
+  }
 
-    if (trimmedComment.length > MAX_COMMENT_LENGTH) {
-      return;
-    }
+  if (trimmedComment.length > MAX_COMMENT_LENGTH) {
+    return;
+  }
 
-    setIsSubmitting(true);
+  setIsSubmitting(true);
 
-    try {
-      const res = await axiosInstance.post("/comment/postcomment", {
-        videoid: videoId,
-        commentbody: trimmedComment,
-        mentions: extractMentions(trimmedComment),
-        altcha: captchaToken || undefined,
-      });
+  try {
+    const res = await axiosInstance.post("/comment/postcomment", {
+      videoid: videoId,
+      commentbody: trimmedComment,
+      mentions: extractMentions(trimmedComment),
+      altcha: captchaToken || undefined,
+    });
 
-      if (res.data.comment) {
-        await loadComments();
-      }
-
+    if (res.data.comment) {
+      // Clear the input immediately
       setNewComment("");
-    } catch (error: any) {
-      if (error?.response?.status === 429) {
-        setShowCaptcha(true);
-        setCommentError(
-          "You've posted too many comments. Please complete CAPTCHA to continue.",
-        );
-      } else {
-        const message =
-          error?.response?.data?.message || "Unable to post comment.";
 
-        setCommentError(message);
-      }
-    } finally {
-      setIsSubmitting(false);
+      // CAPTCHA is one-time use
+      setCaptchaToken("");
+      setShowCaptcha(false);
+      setCommentError("");
+
+      // Update comments in background.
+      // IMPORTANT: do NOT await this.
+      loadComments().catch((error) => {
+        console.error("Error refreshing comments:", error);
+      });
     }
-  };
+  } catch (error: any) {
+    const status = error?.response?.status;
+    const message =
+      error?.response?.data?.message || "Unable to post comment.";
+
+    if (status === 429) {
+      setShowCaptcha(true);
+      setCaptchaToken("");
+      setCommentError(
+        "You've posted too many comments. Please complete CAPTCHA to continue.",
+      );
+    } else if (
+      status === 403 &&
+      message.toLowerCase().includes("captcha")
+    ) {
+      setShowCaptcha(true);
+      setCaptchaToken("");
+      setCommentError(
+        "CAPTCHA verification failed. Please complete CAPTCHA again.",
+      );
+    } else {
+      setCommentError(message);
+    }
+  } finally {
+    // ALWAYS stop Posting...
+    setIsSubmitting(false);
+  }
+};
 
   // =========================
   // START EDIT
@@ -1069,26 +1091,47 @@ const Comments = ({ videoId }: any) => {
   // COMMENT SORTING
   // =========================
   const sortedComments = [...topLevelComments].sort((a, b) => {
-    if (sortOption === "newest") {
-      return (
-        new Date(b.createdAt || b.postedAt || b.commentedon).getTime() -
-        new Date(a.createdAt || a.postedAt || a.commentedon).getTime()
-      );
-    }
+  if (sortOption === "newest") {
+    return (
+      new Date(b.createdAt || b.postedAt || b.commentedon).getTime() -
+      new Date(a.createdAt || a.postedAt || a.commentedon).getTime()
+    );
+  }
 
-    if (sortOption === "oldest") {
-      return (
-        new Date(a.createdAt || a.postedAt || a.commentedon).getTime() -
-        new Date(b.createdAt || b.postedAt || b.commentedon).getTime()
-      );
-    }
+  if (sortOption === "oldest") {
+    return (
+      new Date(a.createdAt || a.postedAt || a.commentedon).getTime() -
+      new Date(b.createdAt || b.postedAt || b.commentedon).getTime()
+    );
+  }
 
-    if (sortOption === "mostLiked") {
-      return (reactions[b._id]?.likes || 0) - (reactions[a._id]?.likes || 0);
-    }
+  if (sortOption === "mostLiked") {
+    return (reactions[b._id]?.likes || 0) - (reactions[a._id]?.likes || 0);
+  }
 
-    return 0;
-  });
+  if (sortOption === "mostRelevant") {
+    const getRelevanceScore = (comment: Comment) => {
+      const likes = reactions[comment._id]?.likes || 0;
+      const replies = getReplies(comment._id).length;
+
+      const createdAt = new Date(
+        comment.createdAt || comment.postedAt || comment.commentedon
+      ).getTime();
+
+      const ageInHours =
+        (Date.now() - createdAt) / (1000 * 60 * 60);
+
+      // Recent comments receive a higher score.
+      const recencyScore = Math.max(0, 100 - ageInHours);
+
+      return likes * 3 + replies * 2 + recencyScore;
+    };
+
+    return getRelevanceScore(b) - getRelevanceScore(a);
+  }
+
+  return 0;
+});
 
   // =========================
   // UI
@@ -1119,8 +1162,9 @@ const Comments = ({ videoId }: any) => {
           className="border rounded-md px-3 py-2 text-sm bg-white text-black"
         >
           <option value="newest">Newest</option>
-          <option value="oldest">Oldest</option>
-          <option value="mostLiked">Most liked</option>
+<option value="oldest">Oldest</option>
+<option value="mostLiked">Most liked</option>
+<option value="mostRelevant">Most relevant</option>
         </select>
       </div>
 

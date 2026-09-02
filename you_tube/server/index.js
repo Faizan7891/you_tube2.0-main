@@ -50,7 +50,7 @@ app.use(
   "/security",
   securityRoutes
 );
-
+app.use("/uploads", express.static("uploads"));
 const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, () => {
