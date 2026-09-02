@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import axiosInstance from "@/lib/axiosinstance";
+import { useUser } from "@/lib/AuthContext";
 import {
   Play,
   Pause,
@@ -23,11 +25,16 @@ interface VideoPlayerProps {
 }
 
 export default function VideoPlayer({ video }: VideoPlayerProps) {
+  const { user } = useUser();
+
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const controlsTimeoutRef =
     useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Prevent unnecessary backend requests
+  const lastSavedTimeRef = useRef(0);
 
   const [playing, setPlaying] = useState(false);
   const [muted, setMuted] = useState(false);
@@ -44,6 +51,99 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
   // 5.7 - Buffering / loading
   const [isBuffering, setIsBuffering] = useState(false);
   const [bufferedPercent, setBufferedPercent] = useState(0);
+
+  // =========================================================
+  // PROGRESS KEY
+  // =========================================================
+
+  const getProgressKey = () => {
+    return `video-progress-${video._id}`;
+  };
+
+  // =========================================================
+  // 5.8 - SAVE PROGRESS TO BACKEND
+  // =========================================================
+
+  const saveProgressToBackend = async (
+    progress?: number
+  ) => {
+    const player = videoRef.current;
+
+    if (!player || !video?._id || !user) return;
+
+    const time =
+      typeof progress === "number"
+        ? progress
+        : player.currentTime;
+
+    if (!Number.isFinite(time) || time <= 0) return;
+
+    // Don't repeatedly save exactly the same position
+    if (
+      Math.abs(
+        time - lastSavedTimeRef.current
+      ) < 2
+    ) {
+      return;
+    }
+
+    lastSavedTimeRef.current = time;
+
+    try {
+      await axiosInstance.post(
+        "/video/progress",
+        {
+          videoId: video._id,
+          progress: time,
+        }
+      );
+    } catch (error) {
+      console.error(
+        "Failed to save video progress:",
+        error
+      );
+    }
+
+    // Keep localStorage as fallback
+    localStorage.setItem(
+      getProgressKey(),
+      time.toString()
+    );
+  };
+
+  // =========================================================
+  // 5.8 - GET PROGRESS FROM BACKEND
+  // =========================================================
+
+  const getBackendProgress = async () => {
+    if (!video?._id || !user) return null;
+
+    try {
+      const response = await axiosInstance.get(
+        `/video/progress/${video._id}`
+      );
+
+      const backendProgress =
+        response.data?.progress ??
+        response.data?.watchProgress ??
+        response.data?.currentTime;
+
+      if (
+        backendProgress !== undefined &&
+        backendProgress !== null &&
+        Number.isFinite(Number(backendProgress))
+      ) {
+        return Number(backendProgress);
+      }
+    } catch (error) {
+      console.error(
+        "Failed to fetch video progress:",
+        error
+      );
+    }
+
+    return null;
+  };
 
   // =========================================================
   // PLAY / PAUSE
@@ -76,45 +176,52 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
   };
 
   // =========================================================
-  // 5.4 - WATCH PROGRESS
+  // 5.4 + 5.8 - RESUME WATCH PROGRESS
   // =========================================================
 
-  const getProgressKey = () => {
-    return `video-progress-${video._id}`;
-  };
-
-  const saveWatchProgress = () => {
+  const resumeWatchProgress = async () => {
     const player = videoRef.current;
 
     if (!player || !video?._id) return;
 
-    if (player.currentTime > 0) {
-      localStorage.setItem(
-        getProgressKey(),
-        player.currentTime.toString()
-      );
+    let savedTime: number | null = null;
+
+    // First try backend
+    if (user) {
+      savedTime = await getBackendProgress();
     }
-  };
 
-  const resumeWatchProgress = () => {
-    const player = videoRef.current;
+    // Fallback to localStorage
+    if (
+      savedTime === null ||
+      !Number.isFinite(savedTime)
+    ) {
+      const localProgress =
+        localStorage.getItem(
+          getProgressKey()
+        );
 
-    if (!player || !video?._id) return;
+      if (localProgress) {
+        const localTime =
+          Number(localProgress);
 
-    const savedProgress =
-      localStorage.getItem(getProgressKey());
-
-    if (!savedProgress) return;
-
-    const savedTime = Number(savedProgress);
+        if (Number.isFinite(localTime)) {
+          savedTime = localTime;
+        }
+      }
+    }
 
     if (
+      savedTime !== null &&
       Number.isFinite(savedTime) &&
       savedTime > 0 &&
       savedTime < player.duration
     ) {
       player.currentTime = savedTime;
       setCurrentTime(savedTime);
+
+      lastSavedTimeRef.current =
+        savedTime;
     }
   };
 
@@ -125,6 +232,7 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
 
     setDuration(player.duration);
 
+    // Resume asynchronously from backend/localStorage
     resumeWatchProgress();
   };
 
@@ -138,13 +246,16 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
     if (!player || !player.duration) return;
 
     if (player.buffered.length > 0) {
-      const bufferedEnd = player.buffered.end(
-        player.buffered.length - 1
-      );
+      const bufferedEnd =
+        player.buffered.end(
+          player.buffered.length - 1
+        );
 
       const percent = Math.min(
         100,
-        (bufferedEnd / player.duration) * 100
+        (bufferedEnd /
+          player.duration) *
+          100
       );
 
       setBufferedPercent(percent);
@@ -166,6 +277,11 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
 
     player.currentTime = time;
     setCurrentTime(time);
+
+    // Save seek position immediately
+    saveProgressToBackend(time);
+
+    showControlsTemporarily();
   };
 
   // =========================================================
@@ -213,20 +329,30 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
 
     if (!player) return;
 
-    player.currentTime = Math.max(
+    const newTime = Math.max(
       0,
       Math.min(
         player.duration || 0,
         player.currentTime + seconds
       )
     );
+
+    player.currentTime = newTime;
+    setCurrentTime(newTime);
+
+    // Save skip position
+    saveProgressToBackend(newTime);
+
+    showControlsTemporarily();
   };
 
   // =========================================================
   // PLAYBACK SPEED
   // =========================================================
 
-  const changePlaybackRate = (rate: number) => {
+  const changePlaybackRate = (
+    rate: number
+  ) => {
     const player = videoRef.current;
 
     if (!player) return;
@@ -241,7 +367,8 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
   // =========================================================
 
   const toggleFullscreen = async () => {
-    const container = containerRef.current;
+    const container =
+      containerRef.current;
 
     if (!container) return;
 
@@ -277,7 +404,9 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
     if (!player) return;
 
     try {
-      if (document.pictureInPictureElement) {
+      if (
+        document.pictureInPictureElement
+      ) {
         await document.exitPictureInPicture();
       } else if (
         document.pictureInPictureEnabled
@@ -301,8 +430,13 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
       return "0:00";
     }
 
-    const minutes = Math.floor(time / 60);
-    const seconds = Math.floor(time % 60);
+    const minutes = Math.floor(
+      time / 60
+    );
+
+    const seconds = Math.floor(
+      time % 60
+    );
 
     return `${minutes}:${seconds
       .toString()
@@ -322,7 +456,6 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
       );
     }
 
-    // Keep controls visible when paused
     if (!playing) {
       return;
     }
@@ -334,26 +467,93 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
   };
 
   // =========================================================
-  // 5.4 - SAVE EVERY 5 SECONDS
+  // 5.4 - SAVE LOCAL PROGRESS EVERY 5 SEC
+  // 5.8 - SAVE BACKEND PROGRESS EVERY 5 SEC
   // =========================================================
 
   useEffect(() => {
     const interval = setInterval(() => {
-      saveWatchProgress();
+      const player = videoRef.current;
+
+      if (!player || player.paused) return;
+
+      // Local backup
+      if (
+        player.currentTime > 0
+      ) {
+        localStorage.setItem(
+          getProgressKey(),
+          player.currentTime.toString()
+        );
+      }
+
+      // Backend
+      saveProgressToBackend(
+        player.currentTime
+      );
     }, 5000);
 
     return () => {
       clearInterval(interval);
     };
-  }, [video?._id]);
+  }, [video?._id, user]);
 
   // =========================================================
-  // 5.4 - SAVE WHEN LEAVING PAGE
+  // 5.8 - SAVE WHEN LEAVING PAGE
   // =========================================================
 
   useEffect(() => {
     const handleBeforeUnload = () => {
-      saveWatchProgress();
+      const player = videoRef.current;
+
+      if (!player || !video?._id) return;
+
+      const time =
+        player.currentTime;
+
+      if (
+        Number.isFinite(time) &&
+        time > 0
+      ) {
+        localStorage.setItem(
+          getProgressKey(),
+          time.toString()
+        );
+      }
+
+      // Use fetch with keepalive so browser can
+      // finish sending request while page closes.
+      if (user) {
+        try {
+          const backendUrl =
+            process.env
+              .NEXT_PUBLIC_BACKEND_URL ||
+            process.env.BACKEND_URL;
+
+          if (backendUrl) {
+            fetch(
+              `${backendUrl}/video/progress`,
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type":
+                    "application/json",
+                },
+                body: JSON.stringify({
+                  videoId: video._id,
+                  progress: time,
+                }),
+                keepalive: true,
+              }
+            ).catch(() => {});
+          }
+        } catch (error) {
+          console.error(
+            "Unload progress save error:",
+            error
+          );
+        }
+      }
     };
 
     window.addEventListener(
@@ -367,6 +567,31 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
         handleBeforeUnload
       );
     };
+  }, [video?._id, user]);
+
+  // =========================================================
+  // SAVE WHEN COMPONENT UNMOUNTS
+  // =========================================================
+
+  useEffect(() => {
+    return () => {
+      const player = videoRef.current;
+
+      if (!player || !video?._id) return;
+
+      const time =
+        player.currentTime;
+
+      if (
+        Number.isFinite(time) &&
+        time > 0
+      ) {
+        localStorage.setItem(
+          getProgressKey(),
+          time.toString()
+        );
+      }
+    };
   }, [video?._id]);
 
   // =========================================================
@@ -374,12 +599,13 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
   // =========================================================
 
   useEffect(() => {
-    const handleFullscreenChange = () => {
-      setIsFullscreen(
-        document.fullscreenElement ===
-          containerRef.current
-      );
-    };
+    const handleFullscreenChange =
+      () => {
+        setIsFullscreen(
+          document.fullscreenElement ===
+            containerRef.current
+        );
+      };
 
     document.addEventListener(
       "fullscreenchange",
@@ -412,7 +638,14 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
       setPlaying(false);
       setShowControls(true);
 
-      if (controlsTimeoutRef.current) {
+      // Save immediately when paused
+      saveProgressToBackend(
+        player.currentTime
+      );
+
+      if (
+        controlsTimeoutRef.current
+      ) {
         clearTimeout(
           controlsTimeoutRef.current
         );
@@ -423,10 +656,27 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
       setPlaying(false);
       setShowControls(true);
 
+      // Video completed
       if (video?._id) {
         localStorage.removeItem(
           `video-progress-${video._id}`
         );
+      }
+
+      // Save 0 so backend can treat video
+      // as completed/reset
+      if (user) {
+        axiosInstance
+          .post("/video/progress", {
+            videoId: video._id,
+            progress: 0,
+          })
+          .catch((error) => {
+            console.error(
+              "Failed to reset progress:",
+              error
+            );
+          });
       }
     };
 
@@ -461,7 +711,7 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
         handleEnded
       );
     };
-  }, [video?._id]);
+  }, [video?._id, user]);
 
   // =========================================================
   // 5.5 - KEYBOARD SHORTCUTS
@@ -497,31 +747,44 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
         // LEFT = BACK 10 / SHIFT = BACK 30
         case "ArrowLeft":
           e.preventDefault();
+
           skip(
-            e.shiftKey ? -30 : -10
+            e.shiftKey
+              ? -30
+              : -10
           );
+
           break;
 
         // RIGHT = FORWARD 10 / SHIFT = FORWARD 30
         case "ArrowRight":
           e.preventDefault();
+
           skip(
-            e.shiftKey ? 30 : 10
+            e.shiftKey
+              ? 30
+              : 10
           );
+
           break;
 
         // UP = VOLUME UP
         case "ArrowUp":
           e.preventDefault();
 
-          player.volume = Math.min(
-            1,
-            player.volume + 0.1
+          player.volume =
+            Math.min(
+              1,
+              player.volume + 0.1
+            );
+
+          setVolume(
+            player.volume
           );
 
-          setVolume(player.volume);
-
-          if (player.volume > 0) {
+          if (
+            player.volume > 0
+          ) {
             player.muted = false;
             setMuted(false);
           }
@@ -532,14 +795,19 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
         case "ArrowDown":
           e.preventDefault();
 
-          player.volume = Math.max(
-            0,
-            player.volume - 0.1
+          player.volume =
+            Math.max(
+              0,
+              player.volume - 0.1
+            );
+
+          setVolume(
+            player.volume
           );
 
-          setVolume(player.volume);
-
-          if (player.volume === 0) {
+          if (
+            player.volume === 0
+          ) {
             player.muted = true;
             setMuted(true);
           }
@@ -614,7 +882,6 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
           break;
       }
 
-      // Show controls whenever keyboard is used
       setShowControls(true);
     };
 
@@ -637,7 +904,9 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
 
   useEffect(() => {
     return () => {
-      if (controlsTimeoutRef.current) {
+      if (
+        controlsTimeoutRef.current
+      ) {
         clearTimeout(
           controlsTimeoutRef.current
         );
@@ -689,7 +958,9 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
         onPlaying={() =>
           setIsBuffering(false)
         }
-        onProgress={handleProgress}
+        onProgress={
+          handleProgress
+        }
         playsInline
       >
         <source
@@ -725,7 +996,6 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
         {/* TIMELINE */}
 
         <div className="relative w-full mb-3">
-
           {/* BUFFERED PROGRESS */}
 
           <div
@@ -751,7 +1021,6 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
         </div>
 
         <div className="flex items-center gap-3 text-white">
-
           {/* BACK 10 */}
 
           <button
@@ -833,7 +1102,9 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
             value={playbackRate}
             onChange={(e) =>
               changePlaybackRate(
-                Number(e.target.value)
+                Number(
+                  e.target.value
+                )
               )
             }
             className="bg-black/70 text-white border border-white/30 rounded px-2 py-1 text-sm"
@@ -842,15 +1113,19 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
             <option value="0.5">
               0.5x
             </option>
+
             <option value="1">
               1x
             </option>
+
             <option value="1.25">
               1.25x
             </option>
+
             <option value="1.5">
               1.5x
             </option>
+
             <option value="2">
               2x
             </option>
@@ -904,7 +1179,10 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
           {/* TIME */}
 
           <span className="text-sm ml-2 whitespace-nowrap">
-            {formatTime(currentTime)} /{" "}
+            {formatTime(
+              currentTime
+            )}{" "}
+            /{" "}
             {formatTime(duration)}
           </span>
         </div>

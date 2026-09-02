@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+
 const historyschema = mongoose.Schema(
   {
     viewer: {
@@ -6,12 +7,41 @@ const historyschema = mongoose.Schema(
       ref: "user",
       required: true,
     },
+
     videoid: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "videofiles",
       required: true,
     },
-    likedon: { type: Date, default: Date.now },
+
+    // Watch progress in seconds
+    watchPosition: {
+      type: Number,
+      default: 0,
+    },
+
+    // Video duration in seconds
+    videoDuration: {
+      type: Number,
+      default: 0,
+    },
+
+    // Percentage watched
+    watchPercentage: {
+      type: Number,
+      default: 0,
+    },
+
+    // Whether the video has been completed
+    completed: {
+      type: Boolean,
+      default: false,
+    },
+
+    likedon: {
+      type: Date,
+      default: Date.now,
+    },
   },
   {
     timestamps: true,
