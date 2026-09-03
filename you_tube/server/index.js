@@ -51,6 +51,8 @@ app.use(
   securityRoutes
 );
 app.use("/uploads", express.static("uploads"));
+// 6.1 - Serve subtitle files
+app.use("/subtitles", express.static(path.join("subtitles")));
 const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, () => {

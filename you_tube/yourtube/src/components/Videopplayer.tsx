@@ -16,15 +16,28 @@ import {
   PanelsTopLeft,
 } from "lucide-react";
 
+interface VideoQuality {
+  label: string;
+  src: string;
+  height?: number;
+  width?: number;
+}
+
 interface VideoPlayerProps {
   video: {
     _id: string;
     videotitle: string;
     filepath: string;
+
+    qualities?: VideoQuality[];
   };
+
+  // 6.4 - Called by the player when the autoplay countdown finishes.
+  // The parent component should switch to the next video.
+  onNextVideo?: () => void;
 }
 
-export default function VideoPlayer({ video }: VideoPlayerProps) {
+export default function VideoPlayer({ video, onNextVideo }: VideoPlayerProps) {
   const { user } = useUser();
 
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -32,9 +45,6 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
 
   const controlsTimeoutRef =
     useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Prevent unnecessary backend requests
-  const lastSavedTimeRef = useRef(0);
 
   const [playing, setPlaying] = useState(false);
   const [muted, setMuted] = useState(false);
@@ -44,106 +54,38 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
   const [playbackRate, setPlaybackRate] = useState(1);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isTheater, setIsTheater] = useState(false);
+const [selectedQuality, setSelectedQuality] =
+  useState("Auto");
+  // =========================================================
+  // 5.6 - AUTO HIDE CONTROLS
+  // =========================================================
 
-  // 5.6 - Auto hide controls
   const [showControls, setShowControls] = useState(true);
 
-  // 5.7 - Buffering / loading
+  // =========================================================
+  // 5.7 - BUFFERING / LOADING
+  // =========================================================
+
   const [isBuffering, setIsBuffering] = useState(false);
   const [bufferedPercent, setBufferedPercent] = useState(0);
 
   // =========================================================
-  // PROGRESS KEY
+  // 6.1 - SUBTITLES / CAPTIONS
   // =========================================================
 
-  const getProgressKey = () => {
-    return `video-progress-${video._id}`;
-  };
+  const [captionsEnabled, setCaptionsEnabled] = useState(false);
 
   // =========================================================
-  // 5.8 - SAVE PROGRESS TO BACKEND
+  // 6.4 - AUTOPLAY NEXT COUNTDOWN + CANCEL
   // =========================================================
 
-  const saveProgressToBackend = async (
-    progress?: number
-  ) => {
-    const player = videoRef.current;
+  const [showAutoplayCountdown, setShowAutoplayCountdown] =
+    useState(false);
+  const [autoplayCountdown, setAutoplayCountdown] = useState(5);
 
-    if (!player || !video?._id || !user) return;
-
-    const time =
-      typeof progress === "number"
-        ? progress
-        : player.currentTime;
-
-    if (!Number.isFinite(time) || time <= 0) return;
-
-    // Don't repeatedly save exactly the same position
-    if (
-      Math.abs(
-        time - lastSavedTimeRef.current
-      ) < 2
-    ) {
-      return;
-    }
-
-    lastSavedTimeRef.current = time;
-
-    try {
-      await axiosInstance.post(
-        "/video/progress",
-        {
-          videoId: video._id,
-          progress: time,
-        }
-      );
-    } catch (error) {
-      console.error(
-        "Failed to save video progress:",
-        error
-      );
-    }
-
-    // Keep localStorage as fallback
-    localStorage.setItem(
-      getProgressKey(),
-      time.toString()
-    );
-  };
-
-  // =========================================================
-  // 5.8 - GET PROGRESS FROM BACKEND
-  // =========================================================
-
-  const getBackendProgress = async () => {
-    if (!video?._id || !user) return null;
-
-    try {
-      const response = await axiosInstance.get(
-        `/video/progress/${video._id}`
-      );
-
-      const backendProgress =
-        response.data?.progress ??
-        response.data?.watchProgress ??
-        response.data?.currentTime;
-
-      if (
-        backendProgress !== undefined &&
-        backendProgress !== null &&
-        Number.isFinite(Number(backendProgress))
-      ) {
-        return Number(backendProgress);
-      }
-    } catch (error) {
-      console.error(
-        "Failed to fetch video progress:",
-        error
-      );
-    }
-
-    return null;
-  };
+  const autoplayTimerRef = useRef<
+    ReturnType<typeof setInterval> | null
+  >(null);
 
   // =========================================================
   // PLAY / PAUSE
@@ -176,52 +118,90 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
   };
 
   // =========================================================
-  // 5.4 + 5.8 - RESUME WATCH PROGRESS
+  // 5.4 - WATCH PROGRESS
   // =========================================================
 
-  const resumeWatchProgress = async () => {
+  const getProgressKey = () => {
+    return `video-progress-${video._id}`;
+  };
+
+  const saveWatchProgress = () => {
     const player = videoRef.current;
 
     if (!player || !video?._id) return;
 
-    let savedTime: number | null = null;
+    if (player.currentTime > 0) {
+      localStorage.setItem(
+        getProgressKey(),
+        player.currentTime.toString()
+      );
+    }
+  };
 
-    // First try backend
-    if (user) {
-      savedTime = await getBackendProgress();
+  // =========================================================
+  // 6.2 - CHANGE VIDEO QUALITY
+  // =========================================================
+
+  const changeQuality = async (
+    quality: VideoQuality | null
+  ) => {
+    const player = videoRef.current;
+
+    if (!player) return;
+
+    const currentTime = player.currentTime;
+    const wasPlaying = !player.paused;
+
+    const backend =
+      process.env.NEXT_PUBLIC_BACKEND_URL ||
+      process.env.BACKEND_URL ||
+      "";
+
+    if (!quality) {
+      player.src = `${backend}/${video.filepath}`;
+      setSelectedQuality("Auto");
+    } else {
+      player.src = `${backend}/${quality.src}`;
+      setSelectedQuality(quality.label);
     }
 
-    // Fallback to localStorage
-    if (
-      savedTime === null ||
-      !Number.isFinite(savedTime)
-    ) {
-      const localProgress =
-        localStorage.getItem(
-          getProgressKey()
+    player.load();
+
+    player.addEventListener(
+      "loadedmetadata",
+      () => {
+        player.currentTime = Math.min(
+          currentTime,
+          player.duration || currentTime
         );
 
-      if (localProgress) {
-        const localTime =
-          Number(localProgress);
-
-        if (Number.isFinite(localTime)) {
-          savedTime = localTime;
+        if (wasPlaying) {
+          player.play().catch(() => {});
         }
-      }
-    }
+      },
+      { once: true }
+    );
+  };
+
+  const resumeWatchProgress = () => {
+    const player = videoRef.current;
+
+    if (!player || !video?._id) return;
+
+    const savedProgress =
+      localStorage.getItem(getProgressKey());
+
+    if (!savedProgress) return;
+
+    const savedTime = Number(savedProgress);
 
     if (
-      savedTime !== null &&
       Number.isFinite(savedTime) &&
       savedTime > 0 &&
       savedTime < player.duration
     ) {
       player.currentTime = savedTime;
       setCurrentTime(savedTime);
-
-      lastSavedTimeRef.current =
-        savedTime;
     }
   };
 
@@ -232,7 +212,6 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
 
     setDuration(player.duration);
 
-    // Resume asynchronously from backend/localStorage
     resumeWatchProgress();
   };
 
@@ -246,16 +225,13 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
     if (!player || !player.duration) return;
 
     if (player.buffered.length > 0) {
-      const bufferedEnd =
-        player.buffered.end(
-          player.buffered.length - 1
-        );
+      const bufferedEnd = player.buffered.end(
+        player.buffered.length - 1
+      );
 
       const percent = Math.min(
         100,
-        (bufferedEnd /
-          player.duration) *
-          100
+        (bufferedEnd / player.duration) * 100
       );
 
       setBufferedPercent(percent);
@@ -277,11 +253,6 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
 
     player.currentTime = time;
     setCurrentTime(time);
-
-    // Save seek position immediately
-    saveProgressToBackend(time);
-
-    showControlsTemporarily();
   };
 
   // =========================================================
@@ -329,7 +300,7 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
 
     if (!player) return;
 
-    const newTime = Math.max(
+    player.currentTime = Math.max(
       0,
       Math.min(
         player.duration || 0,
@@ -337,22 +308,14 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
       )
     );
 
-    player.currentTime = newTime;
-    setCurrentTime(newTime);
-
-    // Save skip position
-    saveProgressToBackend(newTime);
-
-    showControlsTemporarily();
+    setCurrentTime(player.currentTime);
   };
 
   // =========================================================
   // PLAYBACK SPEED
   // =========================================================
 
-  const changePlaybackRate = (
-    rate: number
-  ) => {
+  const changePlaybackRate = (rate: number) => {
     const player = videoRef.current;
 
     if (!player) return;
@@ -367,8 +330,7 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
   // =========================================================
 
   const toggleFullscreen = async () => {
-    const container =
-      containerRef.current;
+    const container = containerRef.current;
 
     if (!container) return;
 
@@ -404,9 +366,7 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
     if (!player) return;
 
     try {
-      if (
-        document.pictureInPictureElement
-      ) {
+      if (document.pictureInPictureElement) {
         await document.exitPictureInPicture();
       } else if (
         document.pictureInPictureEnabled
@@ -422,6 +382,90 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
   };
 
   // =========================================================
+  // 6.1 - TOGGLE SUBTITLES / CAPTIONS
+  // =========================================================
+
+  const toggleCaptions = () => {
+  const player = videoRef.current;
+
+  if (!player) return;
+
+  const tracks = player.textTracks;
+
+  if (!tracks || tracks.length === 0) {
+    console.log("No subtitle tracks found");
+    return;
+  }
+
+  const track = tracks[0];
+
+  if (track.mode === "showing") {
+    track.mode = "hidden";
+    setCaptionsEnabled(false);
+  } else {
+    track.mode = "showing";
+    setCaptionsEnabled(true);
+  }
+};
+
+  // =========================================================
+  // 6.4 - AUTOPLAY NEXT COUNTDOWN + CANCEL
+  // =========================================================
+
+  const cancelAutoplayCountdown = () => {
+    if (autoplayTimerRef.current) {
+      clearInterval(autoplayTimerRef.current);
+      autoplayTimerRef.current = null;
+    }
+
+    setShowAutoplayCountdown(false);
+    setAutoplayCountdown(5);
+  };
+
+  const playNextVideo = () => {
+    // Prefer the parent's real next-video handler.
+    if (onNextVideo) {
+      onNextVideo();
+      return;
+    }
+
+    // Fallback event lets the parent/page handle next-video navigation
+    // without requiring a hard-coded route or video-list implementation.
+    window.dispatchEvent(
+      new CustomEvent("video:autoplay-next", {
+        detail: { videoId: video._id },
+      })
+    );
+  };
+
+  const startAutoplayCountdown = () => {
+    // Prevent multiple timers if ended fires more than once.
+    if (autoplayTimerRef.current) {
+      clearInterval(autoplayTimerRef.current);
+    }
+
+    setAutoplayCountdown(5);
+    setShowAutoplayCountdown(true);
+
+    let remaining = 5;
+
+    autoplayTimerRef.current = setInterval(() => {
+      remaining -= 1;
+      setAutoplayCountdown(remaining);
+
+      if (remaining <= 0) {
+        if (autoplayTimerRef.current) {
+          clearInterval(autoplayTimerRef.current);
+          autoplayTimerRef.current = null;
+        }
+
+        setShowAutoplayCountdown(false);
+        playNextVideo();
+      }
+    }, 1000);
+  };
+
+  // =========================================================
   // TIME FORMAT
   // =========================================================
 
@@ -430,13 +474,8 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
       return "0:00";
     }
 
-    const minutes = Math.floor(
-      time / 60
-    );
-
-    const seconds = Math.floor(
-      time % 60
-    );
+    const minutes = Math.floor(time / 60);
+    const seconds = Math.floor(time % 60);
 
     return `${minutes}:${seconds
       .toString()
@@ -456,6 +495,7 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
       );
     }
 
+    // Keep controls visible when paused
     if (!playing) {
       return;
     }
@@ -467,93 +507,26 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
   };
 
   // =========================================================
-  // 5.4 - SAVE LOCAL PROGRESS EVERY 5 SEC
-  // 5.8 - SAVE BACKEND PROGRESS EVERY 5 SEC
+  // 5.4 - SAVE EVERY 5 SECONDS
   // =========================================================
 
   useEffect(() => {
     const interval = setInterval(() => {
-      const player = videoRef.current;
-
-      if (!player || player.paused) return;
-
-      // Local backup
-      if (
-        player.currentTime > 0
-      ) {
-        localStorage.setItem(
-          getProgressKey(),
-          player.currentTime.toString()
-        );
-      }
-
-      // Backend
-      saveProgressToBackend(
-        player.currentTime
-      );
+      saveWatchProgress();
     }, 5000);
 
     return () => {
       clearInterval(interval);
     };
-  }, [video?._id, user]);
+  }, [video?._id]);
 
   // =========================================================
-  // 5.8 - SAVE WHEN LEAVING PAGE
+  // 5.4 - SAVE WHEN LEAVING PAGE
   // =========================================================
 
   useEffect(() => {
     const handleBeforeUnload = () => {
-      const player = videoRef.current;
-
-      if (!player || !video?._id) return;
-
-      const time =
-        player.currentTime;
-
-      if (
-        Number.isFinite(time) &&
-        time > 0
-      ) {
-        localStorage.setItem(
-          getProgressKey(),
-          time.toString()
-        );
-      }
-
-      // Use fetch with keepalive so browser can
-      // finish sending request while page closes.
-      if (user) {
-        try {
-          const backendUrl =
-            process.env
-              .NEXT_PUBLIC_BACKEND_URL ||
-            process.env.BACKEND_URL;
-
-          if (backendUrl) {
-            fetch(
-              `${backendUrl}/video/progress`,
-              {
-                method: "POST",
-                headers: {
-                  "Content-Type":
-                    "application/json",
-                },
-                body: JSON.stringify({
-                  videoId: video._id,
-                  progress: time,
-                }),
-                keepalive: true,
-              }
-            ).catch(() => {});
-          }
-        } catch (error) {
-          console.error(
-            "Unload progress save error:",
-            error
-          );
-        }
-      }
+      saveWatchProgress();
     };
 
     window.addEventListener(
@@ -567,31 +540,6 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
         handleBeforeUnload
       );
     };
-  }, [video?._id, user]);
-
-  // =========================================================
-  // SAVE WHEN COMPONENT UNMOUNTS
-  // =========================================================
-
-  useEffect(() => {
-    return () => {
-      const player = videoRef.current;
-
-      if (!player || !video?._id) return;
-
-      const time =
-        player.currentTime;
-
-      if (
-        Number.isFinite(time) &&
-        time > 0
-      ) {
-        localStorage.setItem(
-          getProgressKey(),
-          time.toString()
-        );
-      }
-    };
   }, [video?._id]);
 
   // =========================================================
@@ -599,13 +547,12 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
   // =========================================================
 
   useEffect(() => {
-    const handleFullscreenChange =
-      () => {
-        setIsFullscreen(
-          document.fullscreenElement ===
-            containerRef.current
-        );
-      };
+    const handleFullscreenChange = () => {
+      setIsFullscreen(
+        document.fullscreenElement ===
+          containerRef.current
+      );
+    };
 
     document.addEventListener(
       "fullscreenchange",
@@ -638,14 +585,7 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
       setPlaying(false);
       setShowControls(true);
 
-      // Save immediately when paused
-      saveProgressToBackend(
-        player.currentTime
-      );
-
-      if (
-        controlsTimeoutRef.current
-      ) {
+      if (controlsTimeoutRef.current) {
         clearTimeout(
           controlsTimeoutRef.current
         );
@@ -656,28 +596,14 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
       setPlaying(false);
       setShowControls(true);
 
-      // Video completed
       if (video?._id) {
         localStorage.removeItem(
           `video-progress-${video._id}`
         );
       }
 
-      // Save 0 so backend can treat video
-      // as completed/reset
-      if (user) {
-        axiosInstance
-          .post("/video/progress", {
-            videoId: video._id,
-            progress: 0,
-          })
-          .catch((error) => {
-            console.error(
-              "Failed to reset progress:",
-              error
-            );
-          });
-      }
+      // 6.4 - start the 5-second autoplay-next countdown.
+      startAutoplayCountdown();
     };
 
     player.addEventListener(
@@ -711,10 +637,10 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
         handleEnded
       );
     };
-  }, [video?._id, user]);
+  }, [video?._id, onNextVideo]);
 
   // =========================================================
-  // 5.5 - KEYBOARD SHORTCUTS
+  // 6.1 - KEYBOARD SHORTCUTS
   // =========================================================
 
   useEffect(() => {
@@ -749,9 +675,7 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
           e.preventDefault();
 
           skip(
-            e.shiftKey
-              ? -30
-              : -10
+            e.shiftKey ? -30 : -10
           );
 
           break;
@@ -761,9 +685,7 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
           e.preventDefault();
 
           skip(
-            e.shiftKey
-              ? 30
-              : 10
+            e.shiftKey ? 30 : 10
           );
 
           break;
@@ -772,19 +694,14 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
         case "ArrowUp":
           e.preventDefault();
 
-          player.volume =
-            Math.min(
-              1,
-              player.volume + 0.1
-            );
-
-          setVolume(
-            player.volume
+          player.volume = Math.min(
+            1,
+            player.volume + 0.1
           );
 
-          if (
-            player.volume > 0
-          ) {
+          setVolume(player.volume);
+
+          if (player.volume > 0) {
             player.muted = false;
             setMuted(false);
           }
@@ -795,19 +712,14 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
         case "ArrowDown":
           e.preventDefault();
 
-          player.volume =
-            Math.max(
-              0,
-              player.volume - 0.1
-            );
-
-          setVolume(
-            player.volume
+          player.volume = Math.max(
+            0,
+            player.volume - 0.1
           );
 
-          if (
-            player.volume === 0
-          ) {
+          setVolume(player.volume);
+
+          if (player.volume === 0) {
             player.muted = true;
             setMuted(true);
           }
@@ -840,6 +752,13 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
         case "P":
           e.preventDefault();
           togglePiP();
+          break;
+
+        // C = CAPTIONS
+        case "c":
+        case "C":
+          e.preventDefault();
+          toggleCaptions();
           break;
 
         // > = SPEED UP
@@ -878,10 +797,18 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
 
           break;
 
+        // N = NEXT VIDEO
+        case "n":
+        case "N":
+          e.preventDefault();
+          playNextVideo();
+          break;
+
         default:
           break;
       }
 
+      // Show controls whenever keyboard is used
       setShowControls(true);
     };
 
@@ -904,19 +831,32 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
 
   useEffect(() => {
     return () => {
-      if (
-        controlsTimeoutRef.current
-      ) {
+      if (controlsTimeoutRef.current) {
         clearTimeout(
           controlsTimeoutRef.current
         );
       }
+
+      if (autoplayTimerRef.current) {
+        clearInterval(autoplayTimerRef.current);
+        autoplayTimerRef.current = null;
+      }
     };
   }, []);
+
+  // Reset the countdown whenever a different video is loaded.
+  useEffect(() => {
+    cancelAutoplayCountdown();
+  }, [video?._id]);
 
   // =========================================================
   // UI
   // =========================================================
+
+  const backendUrl =
+    process.env.NEXT_PUBLIC_BACKEND_URL ||
+    process.env.BACKEND_URL ||
+    "";
 
   return (
     <div
@@ -937,10 +877,13 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
           : ""
       }`}
     >
-      {/* VIDEO */}
+      {/* =====================================================
+          VIDEO
+      ===================================================== */}
 
       <video
-        ref={videoRef}
+  ref={videoRef}
+  crossOrigin="anonymous"
         className="w-full h-full object-contain"
         onTimeUpdate={
           handleTimeUpdate
@@ -958,25 +901,35 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
         onPlaying={() =>
           setIsBuffering(false)
         }
-        onProgress={
-          handleProgress
-        }
+        onProgress={handleProgress}
         playsInline
       >
         <source
-          src={`${
-            process.env
-              .NEXT_PUBLIC_BACKEND_URL ||
-            process.env.BACKEND_URL
-          }/${video?.filepath}`}
+          src={`${backendUrl}/${video?.filepath}`}
           type="video/mp4"
         />
+
+        {/* ===================================================
+            6.1 - TEST ENGLISH CAPTIONS
+
+            Backend route:
+            /subtitles/test-en.vtt
+        =================================================== */}
+
+        <track
+  kind="subtitles"
+  src="http://localhost:5000/subtitles/test-en.vtt"
+  srcLang="en"
+  label="English"
+/>
 
         Your browser does not support
         the video tag.
       </video>
 
-      {/* 5.7 - BUFFERING SPINNER */}
+      {/* =====================================================
+          5.7 - BUFFERING SPINNER
+      ===================================================== */}
 
       {isBuffering && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
@@ -984,7 +937,37 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
         </div>
       )}
 
-      {/* CUSTOM CONTROLS */}
+      {/* =====================================================
+          6.4 - AUTOPLAY NEXT COUNTDOWN
+      ===================================================== */}
+
+      {showAutoplayCountdown && (
+        <div className="absolute right-4 bottom-20 z-50 w-72 rounded-lg bg-black/90 p-4 text-white shadow-2xl border border-white/10">
+          <div className="text-sm font-semibold">
+            Up next
+          </div>
+
+          <div className="mt-1 text-sm text-white/80">
+            Playing next video in {" "}
+            <span className="font-bold text-white">
+              {autoplayCountdown}
+            </span>{" "}
+            seconds
+          </div>
+
+          <button
+            type="button"
+            onClick={cancelAutoplayCountdown}
+            className="mt-3 rounded-md border border-white/30 px-3 py-1.5 text-sm font-medium hover:bg-white/10 transition"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+
+      {/* =====================================================
+          CUSTOM CONTROLS
+      ===================================================== */}
 
       <div
         className={`absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 to-transparent p-4 transition-opacity duration-300 ${
@@ -993,7 +976,9 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
             : "opacity-0 pointer-events-none"
         }`}
       >
-        {/* TIMELINE */}
+        {/* =================================================
+            TIMELINE
+        ================================================= */}
 
         <div className="relative w-full mb-3">
           {/* BUFFERED PROGRESS */}
@@ -1102,9 +1087,7 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
             value={playbackRate}
             onChange={(e) =>
               changePlaybackRate(
-                Number(
-                  e.target.value
-                )
+                Number(e.target.value)
               )
             }
             className="bg-black/70 text-white border border-white/30 rounded px-2 py-1 text-sm"
@@ -1130,6 +1113,32 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
               2x
             </option>
           </select>
+
+          {/* =================================================
+              6.1 - CAPTIONS / CC
+          ================================================= */}
+
+          <button
+            onClick={toggleCaptions}
+            className={`px-2 py-1 rounded font-semibold text-sm transition ${
+              captionsEnabled
+                ? "bg-white text-black"
+                : "bg-transparent text-white hover:bg-white/20"
+            }`}
+            type="button"
+            title={
+              captionsEnabled
+                ? "Turn captions off"
+                : "Turn captions on"
+            }
+            aria-label={
+              captionsEnabled
+                ? "Turn captions off"
+                : "Turn captions on"
+            }
+          >
+            CC
+          </button>
 
           {/* THEATER */}
 
@@ -1157,6 +1166,48 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
             />
           </button>
 
+          {video.qualities &&
+  video.qualities.length > 0 && (
+    <select
+      value={selectedQuality}
+      onChange={(e) => {
+        const value = e.target.value;
+
+        if (value === "Auto") {
+          changeQuality(null);
+          return;
+        }
+
+        const quality =
+          video.qualities?.find(
+            (item) =>
+              item.label === value
+          );
+
+        if (quality) {
+          changeQuality(quality);
+        }
+      }}
+      className="bg-black/70 text-white border border-white/30 rounded px-2 py-1 text-sm"
+      title="Video quality"
+    >
+      <option value="Auto">
+        Auto
+      </option>
+
+      {video.qualities.map(
+        (quality) => (
+          <option
+            key={quality.label}
+            value={quality.label}
+          >
+            {quality.label}
+          </option>
+        )
+      )}
+    </select>
+  )}
+
           {/* FULLSCREEN */}
 
           <button
@@ -1176,13 +1227,11 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
             )}
           </button>
 
+
           {/* TIME */}
 
           <span className="text-sm ml-2 whitespace-nowrap">
-            {formatTime(
-              currentTime
-            )}{" "}
-            /{" "}
+            {formatTime(currentTime)} /{" "}
             {formatTime(duration)}
           </span>
         </div>
