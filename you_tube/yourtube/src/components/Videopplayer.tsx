@@ -32,13 +32,17 @@ interface VideoPlayerProps {
     qualities?: VideoQuality[];
   };
 
+  
+
   // 6.4 - Called by the player when the autoplay countdown finishes.
   // The parent component should switch to the next video.
   onNextVideo?: () => void;
 }
 
-export default function VideoPlayer({ video, onNextVideo }: VideoPlayerProps) {
-  const { user } = useUser();
+export default function VideoPlayer({
+  video,
+  onNextVideo,
+}: VideoPlayerProps) {  const { user } = useUser();
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -505,6 +509,35 @@ const [selectedQuality, setSelectedQuality] =
         setShowControls(false);
       }, 3000);
   };
+
+  // =========================================================
+// 6.5 - PREVENT MULTIPLE VIDEOS PLAYING SIMULTANEOUSLY
+// =========================================================
+
+useEffect(() => {
+  const videoElement = videoRef.current;
+
+  if (!videoElement) return;
+
+  const handlePlay = () => {
+    const allVideos = document.querySelectorAll("video");
+
+    allVideos.forEach((otherVideo) => {
+      if (
+        otherVideo !== videoElement &&
+        !otherVideo.paused
+      ) {
+        otherVideo.pause();
+      }
+    });
+  };
+
+  videoElement.addEventListener("play", handlePlay);
+
+  return () => {
+    videoElement.removeEventListener("play", handlePlay);
+  };
+}, []);
 
   // =========================================================
   // 5.4 - SAVE EVERY 5 SECONDS
