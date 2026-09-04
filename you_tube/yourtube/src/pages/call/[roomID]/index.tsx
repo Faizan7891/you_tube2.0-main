@@ -50,7 +50,9 @@ export default function VideoCall() {
 
   const screenStreamRef =
     useRef<MediaStream | null>(null);
-
+  
+    const [showParticipants, setShowParticipants] = useState(false);
+const [participants, setParticipants] = useState<string[]>([]);
   // ========================================================
   // GET ROOM ID
   // ========================================================
@@ -411,6 +413,7 @@ export default function VideoCall() {
                 "Room joined:",
                 participants
               );
+              setParticipants(participants);
 
               if (
                 participants.length ===
@@ -449,6 +452,14 @@ export default function VideoCall() {
                 "User joined:",
                 socketId
               );
+
+              setParticipants((current) => {
+  if (current.includes(socketId)) {
+    return current;
+  }
+
+  return [...current, socketId];
+});
 
               remoteSocketIdRef.current =
                 socketId;
@@ -1071,6 +1082,72 @@ export default function VideoCall() {
 
       </div>
 
+
+{showParticipants && (
+  <div className="mx-6 mb-4 rounded-xl border border-gray-800 bg-gray-900 p-5">
+
+    <div className="mb-4 flex items-center justify-between">
+      <h2 className="text-lg font-semibold">
+        Participants
+      </h2>
+
+      <button
+        type="button"
+        onClick={() => setShowParticipants(false)}
+        className="text-gray-400 hover:text-white"
+      >
+        ✕
+      </button>
+    </div>
+
+    <div className="space-y-3">
+
+      <div className="flex items-center justify-between rounded-lg bg-gray-800 p-3">
+        <div>
+          <p className="font-medium">
+            You
+          </p>
+
+          <p className="text-xs text-gray-400">
+            {micEnabled
+              ? "🎤 Microphone on"
+              : "🔇 Microphone off"}
+          </p>
+        </div>
+
+        <span>
+          {cameraEnabled ? "📷" : "🚫📷"}
+        </span>
+      </div>
+
+      {participants.map((participant) => (
+        <div
+          key={participant}
+          className="flex items-center justify-between rounded-lg bg-gray-800 p-3"
+        >
+          <div>
+            <p className="font-medium">
+              Participant
+            </p>
+
+            <p className="max-w-[250px] truncate text-xs text-gray-400">
+              {participant}
+            </p>
+          </div>
+
+          <span>👤</span>
+        </div>
+      ))}
+
+      {participants.length === 0 && (
+        <p className="text-sm text-gray-500">
+          No other participants
+        </p>
+      )}
+
+    </div>
+  </div>
+)}
       {/* CONTROLS */}
 
       <div className="flex justify-center gap-3 border-t border-gray-800 p-6">
@@ -1124,6 +1201,16 @@ export default function VideoCall() {
         >
           📞 Leave
         </button>
+
+        <button
+  type="button"
+  onClick={() =>
+    setShowParticipants((current) => !current)
+  }
+  className="cursor-pointer rounded-full bg-gray-800 px-6 py-3 text-white hover:bg-gray-700"
+>
+  👥 Participants ({participants.length + 1})
+</button>
 
       </div>
 
