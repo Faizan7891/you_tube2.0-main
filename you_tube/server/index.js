@@ -310,6 +310,79 @@ io.on("connection", (socket) => {
   );
 
   // =======================================================
+// IN-CALL CHAT
+// =======================================================
+
+socket.on(
+  "call-chat-message",
+  ({ roomId, message }) => {
+    if (!roomId || !message?.trim()) {
+      return;
+    }
+
+    const room = callRooms.get(roomId);
+
+    if (!room || !room.has(socket.id)) {
+      return;
+    }
+
+    io.to(roomId).emit(
+      "call-chat-message",
+      {
+        sender: socket.id,
+        message: message.trim(),
+        timestamp: Date.now(),
+      }
+    );
+  }
+);
+
+// =======================================================
+// RAISE HAND
+// =======================================================
+
+socket.on(
+  "raise-hand",
+  ({ roomId, raised }) => {
+    if (!roomId) return;
+
+    const room = callRooms.get(roomId);
+
+    if (!room || !room.has(socket.id)) {
+      return;
+    }
+
+    io.to(roomId).emit(
+      "participant-hand",
+      {
+        socketId: socket.id,
+        raised: Boolean(raised),
+      }
+    );
+  }
+);
+
+socket.on(
+  "participant-media-status",
+  ({ roomId, micEnabled, cameraEnabled }) => {
+    const room = callRooms.get(roomId);
+
+    if (!room || !room.has(socket.id)) {
+      return;
+    }
+
+    socket.to(roomId).emit(
+      "participant-media-status",
+      {
+        socketId: socket.id,
+        micEnabled: Boolean(micEnabled),
+        cameraEnabled: Boolean(cameraEnabled),
+      }
+    );
+  }
+);
+
+  // =======================================================
   // LEAVE CALL
   // =======================================================
 
