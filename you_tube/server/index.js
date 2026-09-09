@@ -147,6 +147,21 @@ const io = new Server(server, {
 
 const callRooms = new Map();
 
+// Host of each room
+const callHosts = new Map();
+
+// Co-hosts for each room
+const callCoHosts = new Map();
+
+// Meeting lock state
+const lockedRooms = new Map();
+
+// Chat permission
+const chatPermissions = new Map();
+
+// Screen-share permission
+const screenSharePermissions = new Map();
+
 // =========================================================
 // SOCKET CONNECTION
 // =========================================================
@@ -171,11 +186,65 @@ io.on("connection", (socket) => {
         return;
       }
 
-      const room =
-        callRooms.get(roomId) || new Set();
+      let room = callRooms.get(roomId);
 
       // ---------------------------------------------------
-      // MAX 2 USERS FOR 7.1
+      // CREATE NEW ROOM
+      // ---------------------------------------------------
+
+      if (!room) {
+        room = new Set();
+
+        callRooms.set(roomId, room);
+
+        // First participant becomes host
+        callHosts.set(
+          roomId,
+          socket.id
+        );
+
+        callCoHosts.set(
+          roomId,
+          new Set()
+        );
+
+        lockedRooms.set(
+          roomId,
+          false
+        );
+
+        chatPermissions.set(
+          roomId,
+          true
+        );
+
+        screenSharePermissions.set(
+          roomId,
+          true
+        );
+      }
+
+      // ---------------------------------------------------
+      // MEETING LOCK
+      // ---------------------------------------------------
+
+      const hostId =
+        callHosts.get(roomId);
+
+      if (
+        lockedRooms.get(roomId) &&
+        socket.id !== hostId
+      ) {
+        socket.emit("call-error", {
+          message:
+            "This meeting is locked by the host",
+        });
+
+        return;
+      }
+
+      // ---------------------------------------------------
+      // MAX 2 USERS
       // ---------------------------------------------------
 
       if (room.size >= 2) {
@@ -186,6 +255,10 @@ io.on("connection", (socket) => {
         return;
       }
 
+      // ---------------------------------------------------
+      // ADD USER
+      // ---------------------------------------------------
+
       room.add(socket.id);
 
       callRooms.set(
@@ -195,14 +268,32 @@ io.on("connection", (socket) => {
 
       socket.join(roomId);
 
-      socket.data.roomId = roomId;
+      socket.data.roomId =
+        roomId;
+
+      socket.data.isHost =
+        callHosts.get(roomId) ===
+        socket.id;
+
+      socket.data.isCoHost =
+        callCoHosts
+          .get(roomId)
+          ?.has(socket.id) || false;
+
+      socket.data.canChat =
+        chatPermissions.get(roomId) !==
+        false;
+
+      socket.data.canScreenShare =
+        screenSharePermissions.get(roomId) !==
+        false;
 
       console.log(
         `User ${socket.id} joined room ${roomId}`
       );
 
       // ---------------------------------------------------
-      // SEND EXISTING PARTICIPANTS TO NEW USER
+      // EXISTING PARTICIPANTS
       // ---------------------------------------------------
 
       const participants = [
@@ -211,11 +302,39 @@ io.on("connection", (socket) => {
         (id) => id !== socket.id
       );
 
+      // ---------------------------------------------------
+      // SEND ROOM INFORMATION
+      // ---------------------------------------------------
+
       socket.emit(
         "room-joined",
         {
           roomId,
           participants,
+
+          hostId:
+            callHosts.get(roomId),
+
+          isHost:
+            callHosts.get(roomId) ===
+            socket.id,
+
+          isCoHost:
+            callCoHosts
+              .get(roomId)
+              ?.has(socket.id) || false,
+
+          meetingLocked:
+            lockedRooms.get(roomId) ||
+            false,
+
+          canChat:
+            chatPermissions.get(roomId) !==
+            false,
+
+          canScreenShare:
+            screenSharePermissions.get(roomId) !==
+            false,
         }
       );
 
@@ -226,7 +345,8 @@ io.on("connection", (socket) => {
       socket.to(roomId).emit(
         "user-joined",
         {
-          socketId: socket.id,
+          socketId:
+            socket.id,
         }
       );
 
@@ -260,7 +380,9 @@ io.on("connection", (socket) => {
       io.to(target).emit(
         "offer",
         {
-          sender: socket.id,
+          sender:
+            socket.id,
+
           offer,
         }
       );
@@ -281,7 +403,9 @@ io.on("connection", (socket) => {
       io.to(target).emit(
         "answer",
         {
-          sender: socket.id,
+          sender:
+            socket.id,
+
           answer,
         }
       );
@@ -302,7 +426,9 @@ io.on("connection", (socket) => {
       io.to(target).emit(
         "ice-candidate",
         {
-          sender: socket.id,
+          sender:
+            socket.id,
+
           candidate,
         }
       );
@@ -310,77 +436,471 @@ io.on("connection", (socket) => {
   );
 
   // =======================================================
-// IN-CALL CHAT
-// =======================================================
+  // IN-CALL CHAT
+  // =======================================================
 
-socket.on(
-  "call-chat-message",
-  ({ roomId, message }) => {
-    if (!roomId || !message?.trim()) {
-      return;
-    }
-
-    const room = callRooms.get(roomId);
-
-    if (!room || !room.has(socket.id)) {
-      return;
-    }
-
-    io.to(roomId).emit(
-      "call-chat-message",
-      {
-        sender: socket.id,
-        message: message.trim(),
-        timestamp: Date.now(),
+  socket.on(
+    "call-chat-message",
+    ({ roomId, message }) => {
+      if (
+        !roomId ||
+        !message?.trim()
+      ) {
+        return;
       }
+
+      const room =
+        callRooms.get(roomId);
+
+      if (
+        !room ||
+        !room.has(socket.id)
+      ) {
+        return;
+      }
+
+      // Check chat permission
+      if (
+        chatPermissions.get(roomId) ===
+        false
+      ) {
+        socket.emit(
+          "call-error",
+          {
+            message:
+              "Chat has been disabled by the host",
+          }
+        );
+
+        return;
+      }
+
+      io.to(roomId).emit(
+        "call-chat-message",
+        {
+          sender:
+            socket.id,
+
+          message:
+            message.trim(),
+
+          timestamp:
+            Date.now(),
+        }
+      );
+    }
+  );
+
+  // =======================================================
+  // RAISE HAND
+  // =======================================================
+
+  socket.on(
+    "raise-hand",
+    ({ roomId, raised }) => {
+      if (!roomId) {
+        return;
+      }
+
+      const room =
+        callRooms.get(roomId);
+
+      if (
+        !room ||
+        !room.has(socket.id)
+      ) {
+        return;
+      }
+
+      io.to(roomId).emit(
+        "participant-hand",
+        {
+          socketId:
+            socket.id,
+
+          raised:
+            Boolean(raised),
+        }
+      );
+    }
+  );
+
+  // =======================================================
+  // PARTICIPANT MEDIA STATUS
+  // =======================================================
+
+  socket.on(
+    "participant-media-status",
+    ({
+      roomId,
+      micEnabled,
+      cameraEnabled,
+    }) => {
+      const room =
+        callRooms.get(roomId);
+
+      if (
+        !room ||
+        !room.has(socket.id)
+      ) {
+        return;
+      }
+
+      socket.to(roomId).emit(
+        "participant-media-status",
+        {
+          socketId:
+            socket.id,
+
+          micEnabled:
+            Boolean(micEnabled),
+
+          cameraEnabled:
+            Boolean(cameraEnabled),
+        }
+      );
+    }
+  );
+
+  // =======================================================
+  // HOST / CO-HOST CHECK
+  // =======================================================
+
+  function isHostOrCoHost() {
+    const roomId =
+      socket.data.roomId;
+
+    if (!roomId) {
+      return false;
+    }
+
+    const hostId =
+      callHosts.get(roomId);
+
+    const coHosts =
+      callCoHosts.get(roomId) ||
+      new Set();
+
+    return (
+      socket.id === hostId ||
+      coHosts.has(socket.id)
     );
   }
-);
 
-// =======================================================
-// RAISE HAND
-// =======================================================
+  // =======================================================
+  // HOST MUTE PARTICIPANT
+  // =======================================================
 
-socket.on(
-  "raise-hand",
-  ({ roomId, raised }) => {
-    if (!roomId) return;
+  socket.on(
+    "host-mute-participant",
+    ({ targetId }) => {
+      const roomId =
+        socket.data.roomId;
 
-    const room = callRooms.get(roomId);
-
-    if (!room || !room.has(socket.id)) {
-      return;
-    }
-
-    io.to(roomId).emit(
-      "participant-hand",
-      {
-        socketId: socket.id,
-        raised: Boolean(raised),
+      if (
+        !roomId ||
+        !isHostOrCoHost()
+      ) {
+        return;
       }
-    );
-  }
-);
 
-socket.on(
-  "participant-media-status",
-  ({ roomId, micEnabled, cameraEnabled }) => {
-    const room = callRooms.get(roomId);
+      const room =
+        callRooms.get(roomId);
 
-    if (!room || !room.has(socket.id)) {
-      return;
-    }
-
-    socket.to(roomId).emit(
-      "participant-media-status",
-      {
-        socketId: socket.id,
-        micEnabled: Boolean(micEnabled),
-        cameraEnabled: Boolean(cameraEnabled),
+      if (
+        !room ||
+        !room.has(targetId)
+      ) {
+        return;
       }
-    );
-  }
-);
+
+      io.to(targetId).emit(
+        "force-mute"
+      );
+    }
+  );
+
+  // =======================================================
+  // HOST REMOVE PARTICIPANT
+  // =======================================================
+
+  socket.on(
+    "host-remove-participant",
+    ({ targetId }) => {
+      const roomId =
+        socket.data.roomId;
+
+      if (
+        !roomId ||
+        !isHostOrCoHost()
+      ) {
+        return;
+      }
+
+      if (
+        targetId ===
+        socket.id
+      ) {
+        return;
+      }
+
+      const room =
+        callRooms.get(roomId);
+
+      if (
+        !room ||
+        !room.has(targetId)
+      ) {
+        return;
+      }
+
+      const targetSocket =
+        io.sockets.sockets.get(
+          targetId
+        );
+
+      if (!targetSocket) {
+        return;
+      }
+
+      io.to(targetId).emit(
+        "removed-from-call"
+      );
+
+      setTimeout(() => {
+        targetSocket.disconnect(
+          true
+        );
+      }, 100);
+    }
+  );
+
+  // =======================================================
+  // LOCK / UNLOCK MEETING
+  // =======================================================
+
+  socket.on(
+    "host-lock-meeting",
+    ({ locked }) => {
+      const roomId =
+        socket.data.roomId;
+
+      if (!roomId) {
+        return;
+      }
+
+      // Only actual host can lock
+      if (
+        callHosts.get(roomId) !==
+        socket.id
+      ) {
+        return;
+      }
+
+      const newLocked =
+        Boolean(locked);
+
+      lockedRooms.set(
+        roomId,
+        newLocked
+      );
+
+      io.to(roomId).emit(
+        "meeting-lock-changed",
+        {
+          locked:
+            newLocked,
+        }
+      );
+    }
+  );
+
+  // =======================================================
+  // ASSIGN / REMOVE CO-HOST
+  // =======================================================
+
+  socket.on(
+    "host-set-cohost",
+    ({
+      targetId,
+      isCoHost,
+    }) => {
+      const roomId =
+        socket.data.roomId;
+
+      if (!roomId) {
+        return;
+      }
+
+      // Only host can manage co-hosts
+      if (
+        callHosts.get(roomId) !==
+        socket.id
+      ) {
+        return;
+      }
+
+      const room =
+        callRooms.get(roomId);
+
+      if (
+        !room ||
+        !room.has(targetId)
+      ) {
+        return;
+      }
+
+      const coHosts =
+        callCoHosts.get(roomId) ||
+        new Set();
+
+      if (
+        Boolean(isCoHost)
+      ) {
+        coHosts.add(
+          targetId
+        );
+      } else {
+        coHosts.delete(
+          targetId
+        );
+      }
+
+      callCoHosts.set(
+        roomId,
+        coHosts
+      );
+
+      const targetSocket =
+        io.sockets.sockets.get(
+          targetId
+        );
+
+      if (targetSocket) {
+        targetSocket.data.isCoHost =
+          Boolean(isCoHost);
+      }
+
+      io.to(roomId).emit(
+        "cohost-changed",
+        {
+          socketId:
+            targetId,
+
+          isCoHost:
+            Boolean(isCoHost),
+        }
+      );
+    }
+  );
+
+  // =======================================================
+  // CHAT PERMISSION
+  // =======================================================
+
+  socket.on(
+    "host-chat-permission",
+    ({ allowed }) => {
+      const roomId =
+        socket.data.roomId;
+
+      if (
+        !roomId ||
+        !isHostOrCoHost()
+      ) {
+        return;
+      }
+
+      const newAllowed =
+        Boolean(allowed);
+
+      chatPermissions.set(
+        roomId,
+        newAllowed
+      );
+
+      const room =
+        callRooms.get(roomId);
+
+      if (room) {
+        room.forEach(
+          (socketId) => {
+            const participant =
+              io.sockets.sockets.get(
+                socketId
+              );
+
+            if (participant) {
+              participant.data.canChat =
+                newAllowed;
+            }
+          }
+        );
+      }
+
+      io.to(roomId).emit(
+        "chat-permission-changed",
+        {
+          allowed:
+            newAllowed,
+        }
+      );
+    }
+  );
+
+  // =======================================================
+  // SCREEN SHARE PERMISSION
+  // =======================================================
+
+  socket.on(
+    "host-screen-share-permission",
+    ({ allowed }) => {
+      const roomId =
+        socket.data.roomId;
+
+      if (
+        !roomId ||
+        !isHostOrCoHost()
+      ) {
+        return;
+      }
+
+      const newAllowed =
+        Boolean(allowed);
+
+      screenSharePermissions.set(
+        roomId,
+        newAllowed
+      );
+
+      const room =
+        callRooms.get(roomId);
+
+      if (room) {
+        room.forEach(
+          (socketId) => {
+            const participant =
+              io.sockets.sockets.get(
+                socketId
+              );
+
+            if (participant) {
+              participant.data.canScreenShare =
+                newAllowed;
+            }
+          }
+        );
+      }
+
+      io.to(roomId).emit(
+        "screen-share-permission-changed",
+        {
+          allowed:
+            newAllowed,
+        }
+      );
+    }
+  );
 
   // =======================================================
   // LEAVE CALL
@@ -429,25 +949,112 @@ function removeUserFromCall(socket) {
     return;
   }
 
+  const wasHost =
+    callHosts.get(roomId) ===
+    socket.id;
+
+  // Remove participant
   room.delete(socket.id);
+
+  // Remove from co-hosts
+  const coHosts =
+    callCoHosts.get(roomId);
+
+  if (coHosts) {
+    coHosts.delete(
+      socket.id
+    );
+  }
 
   socket.to(roomId).emit(
     "user-left",
     {
-      socketId: socket.id,
+      socketId:
+        socket.id,
     }
   );
 
+  // =======================================================
+  // ROOM EMPTY
+  // =======================================================
+
   if (room.size === 0) {
-    callRooms.delete(roomId);
-  } else {
+    callRooms.delete(
+      roomId
+    );
+
+    callHosts.delete(
+      roomId
+    );
+
+    callCoHosts.delete(
+      roomId
+    );
+
+    lockedRooms.delete(
+      roomId
+    );
+
+    chatPermissions.delete(
+      roomId
+    );
+
+    screenSharePermissions.delete(
+      roomId
+    );
+  }
+
+  // =======================================================
+  // HOST LEFT
+  // =======================================================
+
+  else {
     callRooms.set(
       roomId,
       room
     );
+
+    // Promote remaining participant
+    if (wasHost) {
+      const newHost =
+        [...room][0];
+
+      callHosts.set(
+        roomId,
+        newHost
+      );
+
+      // Clear old co-host status
+      callCoHosts.set(
+        roomId,
+        new Set()
+      );
+
+      const newHostSocket =
+        io.sockets.sockets.get(
+          newHost
+        );
+
+      if (newHostSocket) {
+        newHostSocket.data.isHost =
+          true;
+
+        newHostSocket.data.isCoHost =
+          false;
+      }
+
+      io.to(roomId).emit(
+        "host-changed",
+        {
+          hostId:
+            newHost,
+        }
+      );
+    }
   }
 
-  socket.data.roomId = null;
+  socket.data.roomId =
+    null;
 
   console.log(
     `User ${socket.id} left room ${roomId}`
